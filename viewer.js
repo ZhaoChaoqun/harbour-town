@@ -246,10 +246,11 @@ function animateScene(time) {
   water.material.uniforms.time.value = time * 0.22;
   gulls.forEach((entry, i) => {
     const phase = i * 0.73;
-    entry.obj.position.x = entry.base.x + Math.sin(time * 0.35 + phase) * 1.2;
-    entry.obj.position.z = entry.base.z + Math.cos(time * 0.35 + phase) * 0.45;
-    entry.obj.position.y = entry.base.y + Math.sin(time * 0.7 + phase) * 0.13;
-    entry.obj.rotation.z = Math.sin(time * 0.35 + phase) * 0.09;
+    const speed = entry.layer === 'front' ? 0.42 : entry.layer === 'middle' ? 0.35 : 0.28;
+    entry.obj.position.x = entry.base.x + Math.sin(time * speed + phase) * 1.2;
+    entry.obj.position.z = entry.base.z + Math.cos(time * speed + phase) * 0.65;
+    entry.obj.position.y = entry.base.y + Math.sin(time * speed * 2 + phase) * 0.17;
+    entry.obj.rotation.z = Math.sin(time * speed + phase) * 0.09;
     entry.obj.traverse(child => {
       if (child.morphTargetInfluences?.length) {
         child.morphTargetInfluences[0] = Math.sin(time * 4.0 + phase) * 0.6;
@@ -290,7 +291,21 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
     const adjustedMaterials = new Set();
     root.traverse(obj => {
       if (obj.name.includes('animated_flight')) {
-        gulls.push({ obj, base: obj.position.clone() });
+        const index = Number(obj.name.match(/Gull_(\d+)/)?.[1]) - 1;
+        if (!Number.isInteger(index) || index < 0 || index >= 26) {
+          throw new Error(`海鸟编号不正确：${obj.name}`);
+        }
+        const layer = index < 10 ? 'rear' : index < 18 ? 'middle' : 'front';
+        if (layer === 'middle') {
+          obj.position.z = 1.7 + (index % 4) * 1.2;
+          obj.position.y = 6.3 + (index % 5) * 0.42;
+        } else if (layer === 'front') {
+          obj.position.x = -12 + (index - 18) * 3.4;
+          obj.position.z = 7.0 + (index % 4) * 1.8;
+          obj.position.y = 4.6 + (index % 6) * 0.45;
+          obj.scale.multiplyScalar(1.3);
+        }
+        gulls.push({ obj, base: obj.position.clone(), layer });
       } else if (obj.name.includes('animated_gentle_bobbing')) {
         boats.push({ obj, base: obj.position.clone() });
       } else if (obj.name.startsWith('Bunting_pennant')) {
@@ -318,6 +333,11 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
     window.harbourState = {
       ready: true, gulls: gulls.length, boats: boats.length,
       pennants: pennants.length, linens: linens.length, time: 0,
+      birdLayers: {
+        rear: gulls.filter(entry => entry.layer === 'rear').length,
+        middle: gulls.filter(entry => entry.layer === 'middle').length,
+        front: gulls.filter(entry => entry.layer === 'front').length,
+      },
     };
   } catch (error) {
     showError(error);

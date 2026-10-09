@@ -8,6 +8,8 @@ The scene features 26 flying gulls, two bobbing boats, 38 fluttering pennants,
 four moving linens, reflective water, and chimney smoke. Orbit, zoom, and pan
 around the town; pause its motion, switch between daylight and dusk, reset the
 camera, save a PNG, or enter fullscreen.
+The gulls occupy three depths: 10 rear, 8 middle, and 8 larger foreground birds
+flying lower over the water, with different flight speeds for each layer.
 Seeded multiscale water normals create natural motion, with calmer water beside
 the quay and subtle ripples around the buoys and fishing boat.
 
