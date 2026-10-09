@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const status = document.querySelector('#status');
 const statusText = document.querySelector('#status-text');
+let dusk = true;
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
@@ -21,17 +22,65 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.info.autoReset = false;
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#7d9a94');
-scene.fog = new THREE.FogExp2('#7d9a94', 0.012);
+function makeSky(top, horizon, ground) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, top);
+  gradient.addColorStop(0.48, horizon);
+  gradient.addColorStop(0.53, horizon);
+  gradient.addColorStop(1, ground);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+const skyTextures = {
+  dusk: makeSky('#344b65', '#778490', '#243d4b'),
+  day: makeSky('#6e8a9e', '#bac8ce', '#446374'),
+};
+const environmentGenerator = new THREE.PMREMGenerator(renderer);
+const skyEnvironments = {
+  dusk: environmentGenerator.fromEquirectangular(skyTextures.dusk),
+  day: environmentGenerator.fromEquirectangular(skyTextures.day),
+};
+environmentGenerator.dispose();
+scene.fog = new THREE.FogExp2('#778490', 0.006);
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 600);
-const start = new THREE.Vector3(19, 13, 35);
-const aim = new THREE.Vector3(0, 3.0, 0);
+const start = new THREE.Vector3(17, 10.3, 31);
+const aim = new THREE.Vector3(-1.4, 2.8, -0.4);
+const framingBounds = new THREE.Box3(
+  new THREE.Vector3(-15.1, -0.7, -6.5), new THREE.Vector3(15.9, 11.7, 7.9)
+);
+const framingPoints = [];
+for (const x of [framingBounds.min.x, framingBounds.max.x]) {
+  for (const y of [framingBounds.min.y, framingBounds.max.y]) {
+    for (const z of [framingBounds.min.z, framingBounds.max.z]) {
+      framingPoints.push(new THREE.Vector3(x, y, z));
+    }
+  }
+}
 function fitCamera() {
-  const scale = Math.max(1, Math.min(3.0, 1.35 / camera.aspect));
-  camera.position.copy(start).sub(aim).multiplyScalar(scale).add(aim);
+  const direction = start.clone().sub(aim).normalize();
+  const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+  const up = new THREE.Vector3().crossVectors(direction, right);
+  const vertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.94;
+  const horizontal = vertical * camera.aspect;
+  let distance = start.distanceTo(aim);
+  for (const point of framingPoints) {
+    const offset = point.clone().sub(aim);
+    distance = Math.max(distance, offset.dot(direction) + Math.max(
+      Math.abs(offset.dot(right)) / horizontal, Math.abs(offset.dot(up)) / vertical
+    ));
+  }
+  camera.position.copy(aim).addScaledVector(direction, distance);
 }
 fitCamera();
 const controls = new OrbitControls(camera, renderer.domElement);
+let cameraAdjusted = false;
 controls.target.copy(aim);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
@@ -40,19 +89,29 @@ controls.maxDistance = 150;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minPolarAngle = Math.PI * 0.13;
 controls.update();
+const dismissHint = () => document.querySelector('.hint').classList.add('dismissed');
+controls.addEventListener('start', () => {
+  cameraAdjusted = true;
+  dismissHint();
+});
+document.querySelector('.toolbar').addEventListener('click', dismissHint, { once: true });
 
-const ambient = new THREE.HemisphereLight('#bed6dc', '#314a40', 1.65);
+const ambient = new THREE.HemisphereLight('#9baec4', '#62584c', 0.42);
 scene.add(ambient);
-const sun = new THREE.DirectionalLight('#c9d9d2', 2.2);
-sun.position.set(-12, 22, 12);
+const sun = new THREE.DirectionalLight('#ffd0a0', 1.85);
+sun.position.set(-18, 12, 10);
+sun.target.position.set(-2, 3, -2);
+scene.add(sun.target);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = sun.shadow.camera.bottom = -23;
 sun.shadow.camera.right = sun.shadow.camera.top = 23;
-sun.shadow.camera.far = 80;
-sun.shadow.normalBias = 0.045;
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 65;
+sun.shadow.bias = -0.00015;
+sun.shadow.normalBias = 0.014;
 scene.add(sun);
-const rim = new THREE.DirectionalLight('#9bc8d4', 1.25);
+const rim = new THREE.DirectionalLight('#8eabc8', 0.32);
 rim.position.set(8, 12, -15);
 scene.add(rim);
 
@@ -81,7 +140,7 @@ function waterNormals() {
     for (let x = 0; x < size; x++) {
       let height = 0;
       for (let octave = 0; octave < 5; octave++) {
-        height += noise(x / size, y / size, 6 * 2 ** octave) * 0.5 ** (octave + 1);
+        height += noise(x / size, y / size, 4 * 2 ** octave) * 0.42 ** (octave + 1);
       }
       heights[y * size + x] = height;
     }
@@ -89,8 +148,8 @@ function waterNormals() {
   const heightAt = (x, y) => heights[wrap(y, size) * size + wrap(x, size)];
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * 6;
-      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * 6;
+      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * 9;
+      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * 9;
       const length = Math.hypot(dx, dy, 1);
       const i = (y * size + x) * 4;
       data[i] = Math.round((dx / length + 1) * 127.5);
@@ -110,11 +169,11 @@ function waterNormals() {
 const water = new Water(new THREE.PlaneGeometry(350, 350), {
   textureWidth: 1024, textureHeight: 1024,
   waterNormals: waterNormals(), sunDirection: sun.position.clone().normalize(),
-  sunColor: '#b7d4c5', waterColor: '#246d61', distortionScale: 1.1, fog: true,
+  sunColor: '#dab68b', waterColor: '#173e4b', distortionScale: 0.85, fog: true,
 });
 water.rotation.x = -Math.PI / 2;
 water.position.y = -0.1;
-water.material.uniforms.size.value = 8.0;
+water.material.uniforms.size.value = 5.5;
 const noiseSample = 'vec4 noise = getNoise( worldPosition.xz * size );';
 if (!water.material.fragmentShader.includes(noiseSample)) {
   throw new Error('Three.js water shader no longer exposes the expected normal sampling hook');
@@ -125,7 +184,7 @@ water.material.fragmentShader = water.material.fragmentShader.replace(
     vec2 delta = p - center;
     float distance = length(delta);
     float envelope = smoothstep(0.12, 0.35, distance) * exp(-distance * 1.1);
-    float pulse = cos(distance * 13.0 - time * 8.0 + phase) * envelope * 0.035;
+    float pulse = cos(distance * 13.0 - time * 8.0 + phase) * envelope * 0.020;
     return delta / max(distance, 0.01) * pulse;
   }
   void main() {`
@@ -138,17 +197,42 @@ water.material.fragmentShader = water.material.fragmentShader.replace(
   float shoreBand = 1.0 - smoothstep(14.0, 20.0, abs(worldPosition.x));
   float shoreCalm = mix(1.0, 0.40 + 0.60 * smoothstep(0.3, 6.0,
     abs(worldPosition.z - 1.55)), shoreBand);
-  noise.xy *= shoreCalm;
+  float distantCalm = mix(0.90, 0.36, smoothstep(25.0, 100.0, length(worldPosition.xz)));
+  noise.xy *= shoreCalm * distantCalm;
   noise.xy += harbourRipple(worldPosition.xz, vec2(-6.0, 7.6), 0.0)
     + harbourRipple(worldPosition.xz, vec2(8.0, 7.0), 1.8)
     + harbourRipple(worldPosition.xz, vec2(-12.2, 5.2), 3.1)
     + harbourRipple(worldPosition.xz, vec2(-11.3, 4.4), 0.7);
 `);
+const reflectionHook = 'vec3( 0.1 ) + reflectionSample * 0.9';
+if (!water.material.fragmentShader.includes(reflectionHook)) {
+  throw new Error('Three.js water shader no longer exposes the expected reflection hook');
+}
+water.material.fragmentShader = water.material.fragmentShader.replace(
+  reflectionHook, 'vec3(0.025) + reflectionSample * 0.85'
+);
+const distanceHook = 'vec3 outgoingLight = albedo;';
+const skyHook = 'uniform vec3 waterColor;';
+const fogHook = '#include <fog_fragment>';
+if (![distanceHook, skyHook, fogHook].every(hook => water.material.fragmentShader.includes(hook))) {
+  throw new Error('Three.js water shader no longer exposes the expected distance shading hook');
+}
+water.material.uniforms.harbourSky = { value: skyTextures.dusk };
+water.material.uniforms.harbourViewport = { value: renderer.getDrawingBufferSize(new THREE.Vector2()) };
+// Match the screen-space sky at the far edge instead of revealing a finite water plane.
+water.material.fragmentShader = water.material.fragmentShader.replace(
+  skyHook, `${skyHook}\n uniform sampler2D harbourSky;\n uniform vec2 harbourViewport;`
+).replace(
+  distanceHook,
+  `vec3 distantSky = texture2D(harbourSky, vec2(0.5, gl_FragCoord.y / harbourViewport.y)).rgb;
+  vec3 outgoingLight = mix(albedo, distantSky,
+    smoothstep(45.0, 155.0, length(worldPosition.xz)));`
+).replace(fogHook, '');
 scene.add(water);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.65, 1.0);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.16, 0.45, 1.1);
 composer.addPass(bloom);
 composer.addPass(new SMAAPass());
 composer.addPass(new OutputPass());
@@ -159,7 +243,33 @@ const linens = [];
 const smokeSprites = [];
 let playing = true;
 let elapsed = 0;
-let dusk = false;
+const localLights = [];
+const litMaterials = new Map();
+const warehouseMaterials = new Map();
+const materialStyles = {
+  'Sage painted plaster': { color: '#c3c5b5', roughness: 0.91 },
+  'Warm grey plaster': { color: '#c9bda5', roughness: 0.92 },
+  'Pale stone trim': { color: '#d6ccb6', roughness: 0.86 },
+  'Old faded blue mint boarding': { color: '#8d9c9b', roughness: 0.82 },
+  'Weathered quay concrete': { color: '#879397', roughness: 0.94 },
+  'Slate green roof': { color: '#3e6362', roughness: 0.62, metalness: 0.08 },
+  'Muted clay red roof tiles': { color: '#596c65', roughness: 0.78 },
+  'Old dock timber': { color: '#a18560', roughness: 0.78 },
+  'Ochre crane steel': { color: '#927848', roughness: 0.42, metalness: 0.42 },
+  'Charcoal teal iron': { color: '#344749', roughness: 0.34, metalness: 0.58 },
+  'Faded blue shutters': { color: '#627f80', roughness: 0.79 },
+  'Ivory cafe canvas': { color: '#dfd0b3', roughness: 0.95 },
+  'Soft linen curtains': { color: '#b3a68e', roughness: 0.96 },
+  'Unlit blue green glass': { color: '#456978', roughness: 0.13, metalness: 0.18 },
+};
+const emissionLevels = {
+  'Dim golden residential windows': { dusk: 0.22, day: 0.025 },
+  'Soft amber illuminated windows': { dusk: 0.66, day: 0.08 },
+  'Warm illuminated windows': { dusk: 0.86, day: 0.10 },
+  'Bright amber shop windows': { dusk: 1.18, day: 0.15 },
+  'Green navigation light': { dusk: 1.3, day: 0.55 },
+  'Red navigation light': { dusk: 1.3, day: 0.55 },
+};
 const clock = new THREE.Clock();
 const flightForward = new THREE.Vector3(0, 0, 1);
 const flightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -261,6 +371,63 @@ for (let i = 0; i < 16; i++) {
   scene.add(sprite);
 }
 
+function styleMaterial(material) {
+  const profile = materialStyles[material.name];
+  if (profile) {
+    const { color, ...response } = profile;
+    material.color.set(color);
+    Object.assign(material, response);
+  }
+  const emission = emissionLevels[material.name];
+  if (emission) {
+    litMaterials.set(material, emission);
+    if (/windows/.test(material.name)) {
+      material.color.multiplyScalar(0.55);
+      material.roughness = 0.27;
+    }
+  }
+  if (/linen|canvas|wings|bunting/i.test(material.name)) material.side = THREE.DoubleSide;
+}
+
+function warehouseMaterial(material) {
+  if (warehouseMaterials.has(material)) return warehouseMaterials.get(material);
+  const restrained = material.clone();
+  restrained.name = `${material.name} (warehouse)`;
+  if (material.name === 'Sage painted plaster') restrained.color.set('#879395');
+  else restrained.color.multiplyScalar(0.88);
+  if (litMaterials.has(material)) {
+    const emission = litMaterials.get(material);
+    litMaterials.set(restrained, { dusk: emission.dusk * 0.48, day: emission.day * 0.48 });
+  }
+  warehouseMaterials.set(material, restrained);
+  return restrained;
+}
+
+function setLighting() {
+  const mode = dusk ? 'dusk' : 'day';
+  scene.background = skyTextures[mode];
+  scene.environment = skyEnvironments[mode].texture;
+  scene.environmentIntensity = dusk ? 0.25 : 0.35;
+  scene.fog.color.set(dusk ? '#778490' : '#bac8ce');
+  ambient.intensity = dusk ? 0.42 : 0.72;
+  sun.color.set(dusk ? '#ffd0a0' : '#ffe0ba');
+  sun.intensity = dusk ? 1.85 : 2.65;
+  sun.position.set(dusk ? -18 : -15, dusk ? 12 : 17, 10);
+  rim.intensity = dusk ? 0.32 : 0.48;
+  renderer.toneMappingExposure = dusk ? 1.04 : 1.0;
+  bloom.strength = dusk ? 0.16 : 0.10;
+  water.material.uniforms.sunDirection.value.copy(sun.position).sub(sun.target.position).normalize();
+  water.material.uniforms.sunColor.value.copy(sun.color).multiplyScalar(dusk ? 0.62 : 0.85);
+  water.material.uniforms.waterColor.value.set(dusk ? '#173e4b' : '#265969');
+  water.material.uniforms.harbourSky.value = skyTextures[mode];
+  for (const [material, emission] of litMaterials) material.emissiveIntensity = emission[mode];
+  for (const { light, intensity } of localLights) light.intensity = intensity * (dusk ? 1 : 0.12);
+  const button = document.querySelector('#time');
+  button.textContent = dusk ? '日间' : '暮色';
+  button.setAttribute('aria-pressed', String(dusk));
+  button.classList.toggle('active', dusk);
+}
+
 function addLocalLights(root) {
   root.updateMatrixWorld(true);
   const positions = [];
@@ -270,11 +437,42 @@ function addLocalLights(root) {
     }
   });
   for (const position of positions.slice(0, 11)) {
-    const lamp = new THREE.PointLight('#ffc481', 7, 3.4, 2);
+    const intensity = position.x < 5 ? 4.8 : 1.6;
+    const lamp = new THREE.PointLight('#ffc17b', intensity, 4.2, 2);
     lamp.position.copy(position);
     lamp.position.y -= 0.12;
     scene.add(lamp);
+    localLights.push({ light: lamp, intensity });
   }
+}
+
+function frameArchitecture(root) {
+  framingPoints.length = 0;
+  root.traverse(obj => {
+    if (!obj.isMesh) return;
+    for (let ancestor = obj; ancestor && ancestor !== root; ancestor = ancestor.parent) {
+      if (ancestor.name.includes('animated_flight')) return;
+    }
+    if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+    const bounds = obj.geometry.boundingBox;
+    for (const x of [bounds.min.x, bounds.max.x]) {
+      for (const y of [bounds.min.y, bounds.max.y]) {
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          const point = new THREE.Vector3(x, y, z).applyMatrix4(obj.matrixWorld);
+          framingPoints.push(point);
+          // Include building reflections without letting the tall mast shrink the whole town.
+          if (point.y > 0 && point.y < 8.8) {
+            const reflection = point.clone();
+            reflection.y = -point.y - 0.2;
+            framingPoints.push(reflection);
+          }
+        }
+      }
+    }
+  });
+  fitCamera();
+  controls.target.copy(aim);
+  controls.update();
 }
 
 // Keep moving groups intact, but batch the thousands of tiny static model parts.
@@ -296,10 +494,12 @@ function batchStatic(root) {
     }
     if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
     const positions = geometry.getAttribute('position');
+    const normals = geometry.getAttribute('normal');
     const colors = new Float32Array(positions.count * 3);
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
-      const shade = 0.94 + 0.06 * Math.sin(x * 7.2 + Math.sin(z * 5.4) + y * 8.6);
+      const underside = 0.84 + 0.16 * THREE.MathUtils.smoothstep(normals.getY(i), -0.55, -0.05);
+      const shade = underside * (0.985 + 0.015 * Math.sin(x * 0.7 + z * 0.4 + y * 0.2));
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = shade;
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -311,6 +511,7 @@ function batchStatic(root) {
   for (const [material, geometries] of buckets) {
     const batchMaterial = material.clone();
     batchMaterial.vertexColors = true;
+    if (litMaterials.has(material)) litMaterials.set(batchMaterial, litMaterials.get(material));
     const merged = mergeGeometries(geometries, false);
     if (!merged) throw new Error(`无法合并静态几何体：${material.name}`);
     const mesh = new THREE.Mesh(merged, batchMaterial);
@@ -323,7 +524,7 @@ function batchStatic(root) {
 }
 
 function animateScene(time, delta) {
-  water.material.uniforms.time.value = time * 0.22;
+  water.material.uniforms.time.value = time * 0.14;
   gulls.forEach((entry, i) => {
     const seed = entry.seed;
     const phase = seed * 0.731;
@@ -364,10 +565,14 @@ function showError(error) {
   window.harbourState = { ready: false, error: error.message };
 }
 
+setLighting();
+
 new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
   try {
     const root = gltf.scene;
     scene.add(root);
+    root.updateMatrixWorld(true);
+    frameArchitecture(root);
     const adjustedMaterials = new Set();
     root.traverse(obj => {
       if (obj.name.includes('animated_flight')) {
@@ -419,8 +624,12 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
         for (const mat of materials) {
           if (adjustedMaterials.has(mat)) continue;
           adjustedMaterials.add(mat);
-          if (mat.emissiveIntensity > 1) mat.emissiveIntensity *= 0.72;
-          if (/linen|canvas|wings|bunting/i.test(mat.name)) mat.side = THREE.DoubleSide;
+          styleMaterial(mat);
+        }
+        const position = new THREE.Vector3().setFromMatrixPosition(obj.matrixWorld);
+        if (position.x > 7.2 && position.y > 2.7 && position.z < 1) {
+          obj.material = Array.isArray(obj.material)
+            ? obj.material.map(warehouseMaterial) : warehouseMaterial(obj.material);
         }
       }
     });
@@ -429,6 +638,7 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
     }
     addLocalLights(root);
     batchStatic(root);
+    setLighting();
     status.classList.add('hidden');
     window.harbourState = {
       ready: true, gulls: gulls.length, boats: boats.length,
@@ -452,18 +662,12 @@ document.querySelector('#motion').addEventListener('click', event => {
   event.currentTarget.classList.toggle('active', playing);
   event.currentTarget.setAttribute('aria-pressed', String(playing));
 });
-document.querySelector('#time').addEventListener('click', event => {
+document.querySelector('#time').addEventListener('click', () => {
   dusk = !dusk;
-  event.currentTarget.textContent = dusk ? '日间' : '暮色';
-  event.currentTarget.setAttribute('aria-pressed', String(dusk));
-  scene.background.set(dusk ? '#405b5c' : '#7d9a94');
-  scene.fog.color.copy(scene.background);
-  ambient.intensity = dusk ? 0.95 : 1.65;
-  sun.intensity = dusk ? 0.9 : 2.2;
-  rim.intensity = dusk ? 0.7 : 1.25;
-  bloom.strength = dusk ? 0.42 : 0.32;
+  setLighting();
 });
 document.querySelector('#reset').addEventListener('click', () => {
+  cameraAdjusted = false;
   fitCamera();
   controls.target.copy(aim);
   controls.update();
@@ -488,7 +692,13 @@ document.querySelector('#fullscreen').addEventListener('click', async () => {
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  if (!cameraAdjusted) {
+    fitCamera();
+    controls.target.copy(aim);
+    controls.update();
+  }
   renderer.setSize(innerWidth, innerHeight);
+  renderer.getDrawingBufferSize(water.material.uniforms.harbourViewport.value);
   composer.setSize(innerWidth, innerHeight);
 });
 function frame() {
@@ -497,7 +707,7 @@ function frame() {
   if (playing) elapsed += delta;
   animateScene(elapsed, playing ? delta : 0);
   controls.update();
-  scene.fog.density = 0.010 * Math.min(1, 40 / camera.position.distanceTo(controls.target));
+  scene.fog.density = 0.006 * Math.min(1, 40 / camera.position.distanceTo(controls.target));
   renderer.info.reset();
   composer.render();
   if (window.harbourState?.ready) {
@@ -506,6 +716,7 @@ function frame() {
     window.harbourState.boatHeight = boats[0]?.obj.position.y;
     window.harbourState.waterTime = water.material.uniforms.time.value;
     window.harbourState.camera = camera.position.toArray();
+    window.harbourState.lighting = dusk ? 'dusk' : 'day';
     window.harbourState.flightSnapshot = gulls.slice(0, 3).map(entry => ({
       position: entry.obj.position.toArray(), rotation: entry.obj.quaternion.toArray(),
     }));

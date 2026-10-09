@@ -14,11 +14,22 @@ limited turns and climbs, coordinated banking, and tower/crane avoidance.
 Seeded multiscale water normals create natural motion, with calmer water beside
 the quay and subtle ripples around the buoys and fishing boat.
 
+The default view is a handmade miniature harbour at early dusk: a warm, low
+side light and restrained sky fill draw attention to the cafe and main hotel.
+Cream plaster, oxidized-teal roofs, subdued warehouse surfaces, and amber lights
+contrast with the blue-grey sky and darker blue-teal water. Soft cast shadows and
+quiet, irregular reflections keep the scene sharp and readable even when paused.
+The closer, lower camera fits the architecture and building reflections at both
+wide and narrow aspect ratios. No new models or depth-of-field blur are added.
+
 ## Controls
 
 Drag to orbit, scroll to zoom, and right-drag to pan. On touchscreens, drag to
 orbit and use two fingers to zoom or pan. The toolbar controls animation,
 lighting, camera reset, image capture, and fullscreen.
+The lighting button offers **daylight** initially because dusk is already active;
+switching modes adjusts the sky, fill/key lights, window emission, and reflections
+together. The gesture hint fades after interaction.
 
 ## Build and preview locally
 
