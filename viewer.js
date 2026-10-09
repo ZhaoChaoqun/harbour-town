@@ -9,9 +9,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createFerrisWheel, connectPleasurePier, FERRIS_WHEEL } from './ferris-wheel.js';
+import { createHarbourExpansion, connectHarbourExpansion } from './harbour-expansion.js';
+import { createHarbourLighting } from './harbour-lighting.js';
+import { architecturePoints, GULL_LAYERS, GULL_OBSTACLES } from './harbour-layout.js';
 
 const status = document.querySelector('#status');
 const statusText = document.querySelector('#status-text');
+let dusk = true;
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
@@ -22,16 +26,39 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.info.autoReset = false;
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#7d9a94');
-scene.fog = new THREE.FogExp2('#7d9a94', 0.012);
+scene.background = new THREE.Color('#758791');
+scene.fog = new THREE.FogExp2('#758791', 0.005);
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 600);
-const start = new THREE.Vector3(17.5, 13, 35);
-const aim = new THREE.Vector3(-1.5, 3.0, 0);
-const fittedPosition = new THREE.Vector3();
+const aim = new THREE.Vector3();
+const framingPoints = architecturePoints().map(point => new THREE.Vector3().fromArray(point));
 function fitCamera() {
-  const scale = Math.max(1, Math.min(3.6, 1.35 / camera.aspect));
-  camera.position.copy(start).sub(aim).multiplyScalar(scale).add(aim);
-  fittedPosition.copy(camera.position);
+  const portrait = camera.aspect < 1;
+  aim.set(portrait ? -0.45 : -1.3, portrait ? 2.4 : 3.5, portrait ? -3.3 : -4);
+  camera.fov = portrait ? 74 : 42;
+  const azimuth = THREE.MathUtils.degToRad(portrait ? -40 : 30);
+  const elevation = THREE.MathUtils.degToRad(portrait ? 30 : 16);
+  const direction = new THREE.Vector3(
+    Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation)
+  );
+  camera.clearViewOffset();
+  const shift = portrait ? innerHeight * 0.11 : 0;
+  if (portrait) camera.setViewOffset(innerWidth, innerHeight, 0, shift, innerWidth, innerHeight);
+  camera.updateProjectionMatrix();
+  const right = new THREE.Vector3().crossVectors(camera.up, direction).normalize();
+  const up = new THREE.Vector3().crossVectors(direction, right);
+  const tangent = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const horizontal = tangent * camera.aspect * (portrait ? 0.97 : 0.92);
+  const top = tangent * Math.max(0.28, 1 - 2 * ((innerWidth <= 600 ? 90 : 112) + shift) / innerHeight);
+  const bottom = tangent * Math.max(0.35, 1 - 2 * (112 - shift) / innerHeight);
+  let distance = portrait ? 24 : 30;
+  for (const point of framingPoints) {
+    const offset = point.clone().sub(aim);
+    const vertical = offset.dot(up);
+    distance = Math.max(distance, offset.dot(direction) + Math.max(
+      Math.abs(offset.dot(right)) / horizontal, vertical >= 0 ? vertical / top : -vertical / bottom
+    ));
+  }
+  camera.position.copy(aim).addScaledVector(direction, distance);
 }
 fitCamera();
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -43,20 +70,56 @@ controls.maxDistance = 150;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minPolarAngle = Math.PI * 0.13;
 controls.update();
+let cameraAdjusted = false;
+controls.addEventListener('start', () => { cameraAdjusted = true; });
+function resetHomeView() {
+  const damping = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.update();
+  fitCamera();
+  controls.target.copy(aim);
+  controls.update();
+  controls.enableDamping = damping;
+}
+function frameArchitecture(root) {
+  framingPoints.length = 0;
+  framingPoints.push(...architecturePoints(false).map(point => new THREE.Vector3().fromArray(point)));
+  root.updateMatrixWorld(true);
+  root.traverse(obj => {
+    if (!obj.isMesh) return;
+    for (let ancestor = obj; ancestor && ancestor !== root; ancestor = ancestor.parent) {
+      if (ancestor.name.includes('animated_flight')) return;
+    }
+    if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+    const bounds = obj.geometry.boundingBox;
+    for (const x of [bounds.min.x, bounds.max.x]) {
+      for (const y of [bounds.min.y, bounds.max.y]) {
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          framingPoints.push(new THREE.Vector3(x, y, z).applyMatrix4(obj.matrixWorld));
+        }
+      }
+    }
+  });
+  if (!cameraAdjusted) resetHomeView();
+}
 
-const ambient = new THREE.HemisphereLight('#bed6dc', '#314a40', 1.65);
+const ambient = new THREE.HemisphereLight('#a6bbd0', '#6a5c4c', 0.48);
 scene.add(ambient);
-const sun = new THREE.DirectionalLight('#c9d9d2', 2.2);
-sun.position.set(-12, 22, 12);
+const sun = new THREE.DirectionalLight('#ffcf9b', 1.45);
+sun.position.set(-19, 15, 13);
+sun.target.position.set(-1.5, 2, -6);
+scene.add(sun.target);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = sun.shadow.camera.bottom = -23;
-sun.shadow.camera.right = sun.shadow.camera.top = 23;
-sun.shadow.camera.far = 80;
-sun.shadow.normalBias = 0.045;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -32;
+sun.shadow.camera.right = sun.shadow.camera.top = 32;
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 95;
+sun.shadow.bias = -0.00012;
+sun.shadow.normalBias = 0.02;
 scene.add(sun);
-const rim = new THREE.DirectionalLight('#9bc8d4', 1.25);
-rim.position.set(8, 12, -15);
+const rim = new THREE.DirectionalLight('#91aecb', 0.5);
+rim.position.set(10, 18, -22);
 scene.add(rim);
 
 // Small, deterministic normal texture; no external images or CDN requests.
@@ -84,7 +147,7 @@ function waterNormals() {
     for (let x = 0; x < size; x++) {
       let height = 0;
       for (let octave = 0; octave < 5; octave++) {
-        height += noise(x / size, y / size, 6 * 2 ** octave) * 0.5 ** (octave + 1);
+        height += noise(x / size, y / size, 4 * 2 ** octave) * 0.42 ** (octave + 1);
       }
       heights[y * size + x] = height;
     }
@@ -92,8 +155,8 @@ function waterNormals() {
   const heightAt = (x, y) => heights[wrap(y, size) * size + wrap(x, size)];
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * 6;
-      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * 6;
+      const dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * 9;
+      const dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * 9;
       const length = Math.hypot(dx, dy, 1);
       const i = (y * size + x) * 4;
       data[i] = Math.round((dx / length + 1) * 127.5);
@@ -110,14 +173,14 @@ function waterNormals() {
   texture.needsUpdate = true;
   return texture;
 }
-const water = new Water(new THREE.PlaneGeometry(350, 350), {
+const water = new Water(new THREE.PlaneGeometry(1000, 1000), {
   textureWidth: 1024, textureHeight: 1024,
   waterNormals: waterNormals(), sunDirection: sun.position.clone().normalize(),
-  sunColor: '#b7d4c5', waterColor: '#246d61', distortionScale: 1.1, fog: true,
+  sunColor: '#d9ba90', waterColor: '#123f50', distortionScale: 0.65, fog: true,
 });
 water.rotation.x = -Math.PI / 2;
 water.position.y = -0.1;
-water.material.uniforms.size.value = 8.0;
+water.material.uniforms.size.value = 5.5;
 const noiseSample = 'vec4 noise = getNoise( worldPosition.xz * size );';
 if (!water.material.fragmentShader.includes(noiseSample)) {
   throw new Error('Three.js water shader no longer exposes the expected normal sampling hook');
@@ -128,7 +191,7 @@ water.material.fragmentShader = water.material.fragmentShader.replace(
     vec2 delta = p - center;
     float distance = length(delta);
     float envelope = smoothstep(0.12, 0.35, distance) * exp(-distance * 1.1);
-    float pulse = cos(distance * 13.0 - time * 8.0 + phase) * envelope * 0.035;
+    float pulse = cos(distance * 13.0 - time * 8.0 + phase) * envelope * 0.020;
     return delta / max(distance, 0.01) * pulse;
   }
   void main() {`
@@ -141,8 +204,9 @@ water.material.fragmentShader = water.material.fragmentShader.replace(
   float shoreBand = 1.0 - smoothstep(14.0, 20.0, abs(worldPosition.x));
   float shoreCalm = mix(1.0, 0.40 + 0.60 * smoothstep(0.3, 6.0,
     abs(worldPosition.z - 1.55)), shoreBand);
-  noise.xy *= shoreCalm;
-  noise.xy += harbourRipple(worldPosition.xz, vec2(-6.0, 7.6), 0.0)
+  float distantCalm = mix(0.90, 0.36, smoothstep(25.0, 100.0, length(worldPosition.xz)));
+  noise.xy *= shoreCalm * distantCalm;
+  noise.xy += harbourRipple(worldPosition.xz, vec2(-7.3, 12.6), 0.0)
     + harbourRipple(worldPosition.xz, vec2(8.0, 7.0), 1.8)
     + harbourRipple(worldPosition.xz, vec2(-12.2, 5.2), 3.1)
     + harbourRipple(worldPosition.xz, vec2(-11.3, 4.4), 0.7);
@@ -151,10 +215,11 @@ scene.add(water);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.65, 1.0);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.26, 0.5, 1.15);
 composer.addPass(bloom);
 composer.addPass(new SMAAPass());
 composer.addPass(new OutputPass());
+const lighting = createHarbourLighting({ renderer, scene, ambient, sun, rim, bloom, water });
 const gulls = [];
 const boats = [];
 const pennants = [];
@@ -162,8 +227,8 @@ const linens = [];
 const smokeSprites = [];
 let playing = true;
 let elapsed = 0;
-let dusk = false;
 let ferrisWheel;
+let harbourExpansion;
 const clock = new THREE.Clock();
 const flightForward = new THREE.Vector3(0, 0, 1);
 const flightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -211,10 +276,7 @@ function flyGull(entry, time, delta) {
     steeringTarget.z = (entry.bounds.minZ + entry.bounds.maxZ) / 2;
   }
   flightHeading.subVectors(steeringTarget, position);
-  for (const obstacle of [
-    { x: 5.1, z: -1.8, height: 12.2, warning: 6.5 },
-    { x: 13.8, z: -1.2, height: 6.9, warning: 7.5 },
-  ]) {
+  for (const obstacle of GULL_OBSTACLES) {
     const dx = position.x - obstacle.x, dz = position.z - obstacle.z;
     const distance = Math.hypot(dx, dz);
     if (position.y < obstacle.height && distance < obstacle.warning) {
@@ -274,10 +336,12 @@ function addLocalLights(root) {
     }
   });
   for (const position of positions.slice(0, 11)) {
-    const lamp = new THREE.PointLight('#ffc481', 7, 3.4, 2);
+    const intensity = position.x < 5 ? 4.8 : 2.4;
+    const lamp = new THREE.PointLight('#ffc17b', intensity, 4.2, 2);
     lamp.position.copy(position);
     lamp.position.y -= 0.12;
     scene.add(lamp);
+    lighting.registerLamp(lamp, intensity);
   }
 }
 
@@ -300,10 +364,12 @@ function batchStatic(root) {
     }
     if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
     const positions = geometry.getAttribute('position');
+    const normals = geometry.getAttribute('normal');
     const colors = new Float32Array(positions.count * 3);
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i), y = positions.getY(i), z = positions.getZ(i);
-      const shade = 0.94 + 0.06 * Math.sin(x * 7.2 + Math.sin(z * 5.4) + y * 8.6);
+      const underside = 0.84 + 0.16 * THREE.MathUtils.smoothstep(normals.getY(i), -0.55, -0.05);
+      const shade = underside * (0.985 + 0.015 * Math.sin(x * 0.7 + z * 0.4 + y * 0.2));
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = shade;
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -315,6 +381,7 @@ function batchStatic(root) {
   for (const [material, geometries] of buckets) {
     const batchMaterial = material.clone();
     batchMaterial.vertexColors = true;
+    lighting.registerClone(material, batchMaterial);
     const merged = mergeGeometries(geometries, false);
     if (!merged) throw new Error(`无法合并静态几何体：${material.name}`);
     const mesh = new THREE.Mesh(merged, batchMaterial);
@@ -327,8 +394,9 @@ function batchStatic(root) {
 }
 
 function animateScene(time, delta) {
-  water.material.uniforms.time.value = time * 0.22;
+  water.material.uniforms.time.value = time * 0.14;
   ferrisWheel?.update(time);
+  harbourExpansion?.update(time);
   gulls.forEach((entry, i) => {
     const seed = entry.seed;
     const phase = seed * 0.731;
@@ -369,10 +437,22 @@ function showError(error) {
   window.harbourState = { ready: false, error: error.message };
 }
 
+function setLighting() {
+  lighting.apply(dusk);
+  ferrisWheel?.setDusk(dusk);
+  harbourExpansion?.setDusk(dusk);
+  const button = document.querySelector('#time');
+  button.textContent = dusk ? '日间' : '暮色';
+  button.setAttribute('aria-pressed', String(dusk));
+  button.classList.toggle('active', dusk);
+}
+setLighting();
+
 new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
   try {
     const root = gltf.scene;
     scene.add(root);
+    root.updateMatrixWorld(true);
     const adjustedMaterials = new Set();
     root.traverse(obj => {
       if (obj.name.includes('animated_flight')) {
@@ -382,7 +462,8 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
         }
         const layer = index < 10 ? 'rear' : index < 18 ? 'middle' : 'front';
         if (layer === 'rear') {
-          obj.position.y = Math.max(9.3, obj.position.y);
+          obj.position.y = 12.6 + (index % 4) * 0.4;
+          obj.position.z = -18 + (index % 5) * 1.2;
         } else if (layer === 'middle') {
           obj.position.z = 1.7 + (index % 4) * 1.2;
           obj.position.y = 6.3 + (index % 5) * 0.42;
@@ -399,9 +480,7 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
           }
         });
         const headingCorrection = new THREE.Quaternion().setFromUnitVectors(modelForward, flightForward);
-        const bounds = layer === 'rear' ? { minY: 9.1, maxY: 12.3, minZ: -11, maxZ: -3.1 }
-          : layer === 'middle' ? { minY: 6.1, maxY: 9.1, minZ: 1.4, maxZ: 5.4 }
-            : { minY: 4.1, maxY: 7.9, minZ: 6.0, maxZ: 14.0 };
+        const bounds = GULL_LAYERS[layer];
         const entry = {
           obj, base: obj.position.clone(), layer, seed: index + 1,
           headingCorrection, modelForward, bounds,
@@ -424,8 +503,12 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
         for (const mat of materials) {
           if (adjustedMaterials.has(mat)) continue;
           adjustedMaterials.add(mat);
-          if (mat.emissiveIntensity > 1) mat.emissiveIntensity *= 0.72;
-          if (/linen|canvas|wings|bunting/i.test(mat.name)) mat.side = THREE.DoubleSide;
+          lighting.styleMaterial(mat);
+        }
+        const position = new THREE.Vector3().setFromMatrixPosition(obj.matrixWorld);
+        if (position.x > 7.2 && position.y > 2.7 && position.z < 1) {
+          obj.material = Array.isArray(obj.material)
+            ? obj.material.map(lighting.warehouseMaterial) : lighting.warehouseMaterial(obj.material);
         }
       }
     });
@@ -433,16 +516,25 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
       throw new Error(`动画分组不完整：${gulls.length} 只海鸥，${boats.length} 艘船`);
     }
     connectPleasurePier(root);
+    connectHarbourExpansion(root);
+    frameArchitecture(root);
     addLocalLights(root);
     batchStatic(root);
     ferrisWheel = createFerrisWheel();
-    ferrisWheel.setDusk(dusk);
     scene.add(ferrisWheel.group);
+    harbourExpansion = createHarbourExpansion();
+    scene.add(harbourExpansion.group);
+    setLighting();
     status.classList.add('hidden');
     window.harbourState = {
       ready: true, gulls: gulls.length, boats: boats.length,
       pennants: pennants.length, linens: linens.length, time: 0,
       ferrisWheel: { gondolas: FERRIS_WHEEL.gondolas, revolutionSeconds: FERRIS_WHEEL.revolutionSeconds, angle: 0 },
+      city: {
+        buildings: harbourExpansion.buildings.length, districts: 2, stalls: 3,
+        people: harbourExpansion.people.length + harbourExpansion.walkers.length,
+        walkers: harbourExpansion.walkers.length, mooredBoats: harbourExpansion.boats.length,
+      },
       birdLayers: {
         rear: gulls.filter(entry => entry.layer === 'rear').length,
         middle: gulls.filter(entry => entry.layer === 'middle').length,
@@ -462,22 +554,13 @@ document.querySelector('#motion').addEventListener('click', event => {
   event.currentTarget.classList.toggle('active', playing);
   event.currentTarget.setAttribute('aria-pressed', String(playing));
 });
-document.querySelector('#time').addEventListener('click', event => {
+document.querySelector('#time').addEventListener('click', () => {
   dusk = !dusk;
-  event.currentTarget.textContent = dusk ? '日间' : '暮色';
-  event.currentTarget.setAttribute('aria-pressed', String(dusk));
-  scene.background.set(dusk ? '#405b5c' : '#7d9a94');
-  scene.fog.color.copy(scene.background);
-  ambient.intensity = dusk ? 0.95 : 1.65;
-  sun.intensity = dusk ? 0.9 : 2.2;
-  rim.intensity = dusk ? 0.7 : 1.25;
-  bloom.strength = dusk ? 0.42 : 0.32;
-  ferrisWheel?.setDusk(dusk);
+  setLighting();
 });
 document.querySelector('#reset').addEventListener('click', () => {
-  fitCamera();
-  controls.target.copy(aim);
-  controls.update();
+  cameraAdjusted = false;
+  resetHomeView();
 });
 document.querySelector('#capture').addEventListener('click', () => {
   composer.render();
@@ -497,15 +580,15 @@ document.querySelector('#fullscreen').addEventListener('click', async () => {
   }
 });
 addEventListener('resize', () => {
-  const atHome = camera.position.distanceToSquared(fittedPosition) < 0.0001
-    && controls.target.distanceToSquared(aim) < 0.0001;
   camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  if (atHome) {
-    fitCamera();
-    controls.update();
+  if (cameraAdjusted) {
+    camera.clearViewOffset();
+    if (camera.aspect < 1) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * 0.11, innerWidth, innerHeight);
   }
+  camera.updateProjectionMatrix();
+  if (!cameraAdjusted) resetHomeView();
   renderer.setSize(innerWidth, innerHeight);
+  renderer.getDrawingBufferSize(water.material.uniforms.harbourViewport.value);
   composer.setSize(innerWidth, innerHeight);
 });
 function frame() {
@@ -514,7 +597,7 @@ function frame() {
   if (playing) elapsed += delta;
   animateScene(elapsed, playing ? delta : 0);
   controls.update();
-  scene.fog.density = 0.010 * Math.min(1, 40 / camera.position.distanceTo(controls.target));
+  scene.fog.density = 0.005 * Math.min(1, 40 / camera.position.distanceTo(controls.target));
   renderer.info.reset();
   composer.render();
   if (window.harbourState?.ready) {
@@ -524,6 +607,7 @@ function frame() {
     window.harbourState.waterTime = water.material.uniforms.time.value;
     window.harbourState.ferrisWheel.angle = ferrisWheel.rotor.rotation.z;
     window.harbourState.camera = camera.position.toArray();
+    window.harbourState.lighting = dusk ? 'dusk' : 'day';
     window.harbourState.flightSnapshot = gulls.slice(0, 3).map(entry => ({
       position: entry.obj.position.toArray(), rotation: entry.obj.quaternion.toArray(),
     }));

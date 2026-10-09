@@ -1,56 +1,15 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createGeometryBatch, openQuayRailing } from './harbour-modeling.js';
+import { FERRIS_WHEEL } from './harbour-layout.js';
 
-export const FERRIS_WHEEL = Object.freeze({
-  x: -17.2, z: 0.15, yaw: Math.PI / 10,
-  radius: 2.55, hubHeight: 5.4, deckHeight: 1.7,
-  gondolas: 10, revolutionSeconds: 120,
-  entranceX: -13, entranceMinZ: -0.15, entranceMaxZ: 1.2,
-});
+export { FERRIS_WHEEL };
 
 export function connectPleasurePier(root) {
-  root.updateMatrixWorld(true);
-  const rails = ['Quay railing horizontal.012', 'Quay railing horizontal.013'].map(name => {
-    const rail = root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
-    if (!rail?.isMesh) throw new Error(`Cannot connect pleasure pier: missing ${name}`);
-    return rail;
+  openQuayRailing(root, {
+    names: ['Quay railing horizontal.012', 'Quay railing horizontal.013'],
+    axis: 'z', fixed: FERRIS_WHEEL.entranceX,
+    min: FERRIS_WHEEL.entranceMinZ, max: FERRIS_WHEEL.entranceMaxZ, label: 'Pleasure pier',
   });
-  const railGeometry = new THREE.CylinderGeometry(0.018, 0.018, 1, 8);
-  const up = new THREE.Vector3(0, 1, 0);
-  const { entranceX: x, entranceMinZ: minZ, entranceMaxZ: maxZ } = FERRIS_WHEEL;
-  for (const rail of rails) {
-    const bounds = new THREE.Box3().setFromObject(rail);
-    const y = (bounds.min.y + bounds.max.y) / 2;
-    for (const [start, end] of [[bounds.min.z, minZ], [maxZ, bounds.max.z]]) {
-      const from = root.worldToLocal(new THREE.Vector3(x, y, start));
-      const to = root.worldToLocal(new THREE.Vector3(x, y, end));
-      const direction = to.clone().sub(from);
-      const segment = new THREE.Mesh(railGeometry, rail.material);
-      segment.name = 'Pleasure pier entrance railing';
-      segment.position.copy(from).add(to).multiplyScalar(0.5);
-      segment.quaternion.setFromUnitVectors(up, direction.clone().normalize());
-      segment.scale.y = direction.length();
-      root.add(segment);
-    }
-    rail.removeFromParent();
-  }
-  const blockedPosts = [];
-  const position = new THREE.Vector3();
-  root.traverse(obj => {
-    if (!obj.isMesh || !obj.name.startsWith('Quay_railing_upright')) return;
-    obj.getWorldPosition(position);
-    if (Math.abs(position.x - x) < 0.05 && position.z > minZ && position.z < maxZ) {
-      blockedPosts.push(obj);
-    }
-  });
-  blockedPosts.forEach(post => post.removeFromParent());
-  const postGeometry = new THREE.CylinderGeometry(0.025, 0.025, 0.72, 8);
-  for (const z of [minZ, maxZ]) {
-    const post = new THREE.Mesh(postGeometry, rails[0].material);
-    post.name = 'Pleasure pier entrance post';
-    post.position.copy(root.worldToLocal(new THREE.Vector3(x, 2.06, z)));
-    root.add(post);
-  }
 }
 
 export function createFerrisWheel() {
@@ -79,51 +38,14 @@ export function createFerrisWheel() {
   });
   const bulbMaterial = new THREE.MeshStandardMaterial({
     name: 'Small warm bulbs', color: '#f2dfb5', emissive: '#ffd4a1',
-    emissiveIntensity: 0.15, roughness: 0.65,
+    emissiveIntensity: 0.4, roughness: 0.65,
   });
-  const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
-  const rodGeometry = new THREE.CylinderGeometry(1, 1, 1, 8);
-  const up = new THREE.Vector3(0, 1, 0);
-
-  function batches(parent, name) {
-    const buckets = new Map();
-    const transform = new THREE.Object3D();
-    function part(geometry, material, position, scale = [1, 1, 1], quaternion = null) {
-      transform.position.fromArray(position);
-      transform.scale.fromArray(scale);
-      if (quaternion) transform.quaternion.copy(quaternion);
-      else transform.quaternion.identity();
-      transform.updateMatrix();
-      const copy = geometry.index ? geometry.toNonIndexed() : geometry.clone();
-      copy.deleteAttribute('uv');
-      copy.applyMatrix4(transform.matrix);
-      if (!buckets.has(material)) buckets.set(material, []);
-      buckets.get(material).push(copy);
-    }
-    function box(material, position, size) {
-      part(boxGeometry, material, position, size);
-    }
-    function rod(material, start, end, radius) {
-      const from = new THREE.Vector3().fromArray(start);
-      const to = new THREE.Vector3().fromArray(end);
-      const direction = to.clone().sub(from);
-      part(rodGeometry, material, from.add(to).multiplyScalar(0.5).toArray(),
-        [radius, direction.length(), radius],
-        new THREE.Quaternion().setFromUnitVectors(up, direction.normalize()));
-    }
-    function finish() {
-      for (const [material, parts] of buckets) {
-        const geometry = mergeGeometries(parts, false);
-        if (!geometry) throw new Error(`Cannot batch ${name}: ${material.name}`);
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.name = `${name}: ${material.name}`;
-        mesh.castShadow = mesh.receiveShadow = material !== bulbMaterial;
-        parent.add(mesh);
-        parts.forEach(part => part.dispose());
-      }
-    }
-    return { part, box, rod, finish };
-  }
+  const bandMaterial = new THREE.MeshStandardMaterial({
+    name: 'Warm rim tracing', color: '#f0cfa0', emissive: '#ffd0a0',
+    emissiveIntensity: 0.15, roughness: 0.7,
+  });
+  const unlit = new Set([bulbMaterial, bandMaterial]);
+  const batches = (parent, name) => createGeometryBatch(parent, name, unlit);
 
   const pier = batches(group, 'Pleasure pier');
   for (let plank = 0; plank < 20; plank++) {
@@ -135,13 +57,17 @@ export function createFerrisWheel() {
   for (const x of [-3.2, 3.2]) {
     pier.box(timber, [x, 1.54, 0.2], [0.12, 0.25, 4.7]);
   }
-  for (let plank = 0; plank < 6; plank++) {
-    pier.box(timber, [3.715, 1.64, -0.3 + (plank + 0.5) * 0.225],
-      [1.13, 0.12, 0.211]);
+  for (let plank = 0; plank < 28; plank++) {
+    pier.box(timber, [1.75, 1.64, -8.15 + (plank + 0.5) * 6.15 / 28],
+      [1.1, 0.12, 6.15 / 28 - 0.016]);
   }
-  pier.box(timber, [3.7, 1.5, 0.375], [0.14, 0.16, 1.35]);
-  for (const x of [-2.85, -0.1, 2.85, 3.8]) {
-    for (const z of x === 3.8 ? [-0.2, 0.95] : [-1.85, 2.2]) {
+  pier.box(timber, [2.385, 1.64, -7.475], [0.19, 0.12, 1.35]);
+  for (const z of [-7.65, -5.2, -2.75]) {
+    pier.box(timber, [1.75, 1.5, z], [1.22, 0.16, 0.14]);
+    for (const x of [1.27, 2.23]) pier.rod(timber, [x, -0.55, z], [x, 1.58, z], 0.09);
+  }
+  for (const x of [-2.85, -0.1, 2.85]) {
+    for (const z of [-1.85, 2.2]) {
       pier.rod(timber, [x, -0.55, z], [x, 1.58, z], 0.09);
     }
   }
@@ -156,13 +82,14 @@ export function createFerrisWheel() {
       pier.rod(iron, [x, 1.7, z], [x, 2.42, z], 0.025);
     }
   }
-  railing([-3.2, -2.1], [3.2, -2.1]);
+  railing([-3.2, -2.1], [1.2, -2.1]);
+  railing([2.3, -2.1], [3.2, -2.1]);
   railing([-3.2, 2.5], [3.2, 2.5]);
   railing([-3.2, -2.1], [-3.2, 2.5]);
-  railing([3.2, -2.1], [3.2, -0.3]);
-  railing([3.2, 1.05], [3.2, 2.5]);
-  railing([3.2, -0.3], [4.2, -0.3]);
-  railing([3.2, 1.05], [4.2, 1.05]);
+  railing([3.2, -2.1], [3.2, 2.5]);
+  railing([1.2, -8.15], [1.2, -2.1]);
+  railing([2.3, -6.8], [2.3, -2.1]);
+  railing([1.2, -8.15], [2.4, -8.15]);
   pier.box(teal, [2.2, 1.97, 1.75], [0.55, 0.54, 0.5]);
   pier.box(cream, [2.2, 2.28, 1.75], [0.66, 0.08, 0.57]);
   pier.rod(iron, [2.2, 2.3, 1.52], [2.2, 2.7, 1.52], 0.025);
@@ -208,10 +135,12 @@ export function createFerrisWheel() {
   const rotating = batches(rotor, 'Ferris rim and spokes');
   const rimGeometry = new THREE.TorusGeometry(FERRIS_WHEEL.radius, 0.055, 6, 64);
   const innerRimGeometry = new THREE.TorusGeometry(FERRIS_WHEEL.radius - 0.15, 0.022, 4, 64);
+  const bandGeometry = new THREE.TorusGeometry(FERRIS_WHEEL.radius, 0.014, 4, 96);
   const gondolas = [];
   for (const z of [-0.42, 0.42]) {
     rotating.part(rimGeometry, cream, [0, 0, z]);
     rotating.part(innerRimGeometry, cream, [0, 0, z]);
+    rotating.part(bandGeometry, bandMaterial, [0, 0, z < 0 ? -0.485 : 0.485]);
   }
   for (let i = 0; i < FERRIS_WHEEL.gondolas; i++) {
     const angle = i / FERRIS_WHEEL.gondolas * Math.PI * 2 - Math.PI / 2;
@@ -219,6 +148,8 @@ export function createFerrisWheel() {
     const y = Math.sin(angle) * FERRIS_WHEEL.radius;
     for (const z of [-0.42, 0.42]) {
       rotating.rod(cream, [0, 0, z], [x, y, z], 0.028);
+      rotating.rod(bandMaterial, [x * 0.13, y * 0.13, z < 0 ? -0.455 : 0.455],
+        [x * 0.95, y * 0.95, z < 0 ? -0.455 : 0.455], 0.008);
     }
     rotating.rod(iron, [x, y, -0.42], [x, y, 0.42], 0.022);
     const gondola = new THREE.Object3D();
@@ -234,15 +165,16 @@ export function createFerrisWheel() {
   rotating.finish();
   rimGeometry.dispose();
   innerRimGeometry.dispose();
+  bandGeometry.dispose();
 
-  const bulbGeometry = new THREE.IcosahedronGeometry(0.028, 0);
-  const bulbs = new THREE.InstancedMesh(bulbGeometry, bulbMaterial, 40);
+  const bulbGeometry = new THREE.IcosahedronGeometry(0.045, 0);
+  const bulbs = new THREE.InstancedMesh(bulbGeometry, bulbMaterial, 100);
   bulbs.name = 'Ferris rim bulbs';
   const bulbTransform = new THREE.Object3D();
   for (let i = 0; i < bulbs.count; i++) {
-    const angle = (i % 20) / 20 * Math.PI * 2;
+    const angle = (i % 50) / 50 * Math.PI * 2;
     bulbTransform.position.set(Math.cos(angle) * FERRIS_WHEEL.radius,
-      Math.sin(angle) * FERRIS_WHEEL.radius, i < 20 ? -0.49 : 0.49);
+      Math.sin(angle) * FERRIS_WHEEL.radius, i < 50 ? -0.49 : 0.49);
     bulbTransform.updateMatrix();
     bulbs.setMatrixAt(i, bulbTransform.matrix);
   }
@@ -264,13 +196,16 @@ export function createFerrisWheel() {
   for (const z of [-0.2, 0.2]) {
     cabin.rod(iron, [0, 0, z], [0, -0.175, z], 0.016);
     cabin.box(iron, [0, -0.39, z * 0.75], [0.37, 0.035, 0.08]);
+    cabin.rod(iron, [0, -0.23, z * 1.2], [0, -0.27, z * 1.2], 0.008);
+    cabin.box(iron, [0, -0.265, z * 1.2], [0.1, 0.015, 0.05]);
+    cabin.box(bulbMaterial, [0, -0.31, z * 1.2], [0.075, 0.075, 0.04]);
   }
   cabin.finish();
   const palette = ['#63867c', '#bb7261', '#b39458'].map(color => new THREE.Color(color));
   const cabinMeshes = template.children.map(mesh => {
     const instances = new THREE.InstancedMesh(mesh.geometry, mesh.material, FERRIS_WHEEL.gondolas);
     instances.name = mesh.name;
-    instances.castShadow = instances.receiveShadow = true;
+    instances.castShadow = instances.receiveShadow = mesh.material !== bulbMaterial;
     instances.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     // Fixed sweep bounds avoid stale instance culling as upright cabins move.
     instances.boundingSphere = new THREE.Sphere(
@@ -300,10 +235,9 @@ export function createFerrisWheel() {
     cabinMeshes.forEach(mesh => { mesh.instanceMatrix.needsUpdate = true; });
   }
   function setDusk(dusk) {
-    bulbMaterial.emissiveIntensity = dusk ? 1.2 : 0.15;
+    bulbMaterial.emissiveIntensity = dusk ? 3 : 0.4;
+    bandMaterial.emissiveIntensity = dusk ? 1.2 : 0.15;
   }
-  boxGeometry.dispose();
-  rodGeometry.dispose();
   update(0);
   return { group, rotor, gondolas, update, setDusk };
 }

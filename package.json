@@ -10,6 +10,7 @@
     "build": "node scripts/build.mjs",
     "check:flight": "node check-flight.mjs",
     "check:wheel": "node check-wheel.mjs",
+    "check:harbour": "node check-harbour.mjs",
     "start": "node server.mjs"
   },
   "dependencies": {

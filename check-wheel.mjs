@@ -12,13 +12,13 @@ wheel.group.traverse(obj => {
   if (obj.isMesh) meshes.push(obj);
   if (obj.isLight) lights++;
 });
-assert.ok(meshes.length <= 15, `Too many wheel/pier batches: ${meshes.length}`);
-assert.equal(meshes.filter(mesh => mesh.isInstancedMesh).length, 4);
+assert.ok(meshes.length <= 18, `Too many wheel/pier batches: ${meshes.length}`);
+assert.equal(meshes.filter(mesh => mesh.isInstancedMesh).length, 5);
 const cabins = meshes.filter(mesh => mesh.isInstancedMesh && mesh.name.startsWith('Ferris gondolas'));
-assert.equal(cabins.length, 3);
+assert.equal(cabins.length, 4);
 cabins.forEach(mesh => {
   assert.equal(mesh.count, 10);
-  assert.ok(mesh.castShadow && mesh.receiveShadow);
+  assert.equal(mesh.castShadow && mesh.receiveShadow, mesh.material.name !== 'Small warm bulbs');
   mesh.geometry.computeBoundingBox();
 });
 const up = new THREE.Vector3(0, 1, 0);
@@ -43,8 +43,8 @@ for (let step = 0; step <= 960; step++) {
       const clearance = bounds.min.y - FERRIS_WHEEL.deckHeight;
       minimumDeckClearance = Math.min(minimumDeckClearance, clearance);
       assert.ok(clearance > 0.4, `Cabin ${i} hits the platform at step ${step}`);
-      assert.ok(bounds.max.y < 8.1, 'The wheel must stay near the main rooftop height');
-      assert.ok(bounds.max.x < -13.5, 'Cabins must stay outside the existing quay/buildings');
+      assert.ok(bounds.max.y < 9, 'The wheel must stay below the rear skyline and communications mast');
+      assert.ok(bounds.min.z > 5.6, 'Cabins must stay clear of the existing quay and fishing launch');
       const localBounds = cabin.geometry.boundingBox.clone().applyMatrix4(matrix);
       maximumCabinDepth = Math.max(maximumCabinDepth, Math.abs(localBounds.min.z), Math.abs(localBounds.max.z));
       assert.ok(maximumCabinDepth < 0.365, 'Cabins must clear both rim faces and the A-frame supports');
@@ -69,12 +69,12 @@ assert.deepEqual(cabins.map(mesh => Array.from(mesh.instanceMatrix.array)), init
 assert.throws(() => wheel.update(-1), RangeError);
 assert.throws(() => wheel.update(Infinity), RangeError);
 const bulbs = meshes.find(mesh => mesh.name === 'Ferris rim bulbs');
-assert.equal(bulbs.count, 40);
+assert.equal(bulbs.count, 100);
 assert.ok(!bulbs.castShadow);
 wheel.setDusk(true);
-assert.equal(bulbs.material.emissiveIntensity, 1.2);
+assert.equal(bulbs.material.emissiveIntensity, 3);
 wheel.setDusk(false);
-assert.equal(bulbs.material.emissiveIntensity, 0.15);
+assert.equal(bulbs.material.emissiveIntensity, 0.4);
 assert.ok(!meshes.some(mesh => mesh.material.map), 'Wheel materials must not depend on textures');
 assert.equal(lights, 0, 'Do not add per-bulb lights');
 
@@ -107,5 +107,5 @@ assert.throws(() => connectPleasurePier(new THREE.Group()), /missing Quay railin
 console.log(JSON.stringify({
   gondolas: wheel.gondolas.length, revolutionSeconds: FERRIS_WHEEL.revolutionSeconds,
   sampledRotationSteps: 961, minimumDeckClearance, minimumUprightDot,
-  maximumCabinDepth, meshBatches: meshes.length, instancedBatches: 4, bulbs: bulbs.count,
+  maximumCabinDepth, meshBatches: meshes.length, instancedBatches: 5, bulbs: bulbs.count,
 }));

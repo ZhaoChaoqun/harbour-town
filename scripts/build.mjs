@@ -15,7 +15,8 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, 'vendor/build'), { recursive: true });
 await mkdir(path.join(dist, 'vendor/examples'), { recursive: true });
 await mkdir(path.join(dist, 'assets'), { recursive: true });
-for (const file of ['index.html', 'viewer.js', 'ferris-wheel.js', 'assets/harbour_town.glb']) {
+for (const file of ['index.html', 'viewer.js', 'ferris-wheel.js', 'harbour-modeling.js',
+  'harbour-layout.js', 'harbour-expansion.js', 'harbour-lighting.js', 'assets/harbour_town.glb']) {
   await cp(path.join(root, file), path.join(dist, file));
 }
 for (const file of ['three.module.js', 'three.core.js']) {

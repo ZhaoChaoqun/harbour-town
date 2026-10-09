@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
+import { GULL_LAYERS, GULL_OBSTACLES } from './harbour-layout.js';
 
 const source = fs.readFileSync(new URL('./viewer.js', import.meta.url), 'utf8');
 const start = source.indexOf('function flightNoise(');
@@ -12,14 +13,13 @@ const context = vm.createContext({
   flightHeading: new THREE.Vector3(),
   steeringTarget: new THREE.Vector3(),
   flightEuler: new THREE.Euler(0, 0, 0, 'YXZ'),
+  GULL_OBSTACLES,
 });
 vm.runInContext(source.slice(start, end), context);
 const metrics = { minimumForwardDot: 1, maximumBank: 0, maximumTurnRate: 0, maximumAbsX: 0 };
 for (let index = 0; index < 26; index++) {
   const layer = index < 10 ? 'rear' : index < 18 ? 'middle' : 'front';
-  const bounds = layer === 'rear' ? { minY: 9.1, maxY: 12.3, minZ: -11, maxZ: -3.1 }
-    : layer === 'middle' ? { minY: 6.1, maxY: 9.1, minZ: 1.4, maxZ: 5.4 }
-      : { minY: 4.1, maxY: 7.9, minZ: 6.0, maxZ: 14.0 };
+  const bounds = GULL_LAYERS[layer];
   const yaw = index * 1.731;
   const modelForward = new THREE.Vector3(Math.sin(yaw), -0.02, Math.cos(yaw)).normalize();
   const entry = {
@@ -28,7 +28,7 @@ for (let index = 0; index < 26; index++) {
     direction: new THREE.Vector3(), target: new THREE.Vector3(),
     yaw, pitch: 0, bank: 0, turn: 0, speed: 1.15, waypoint: 0, nextTargetTime: 0,
   };
-  entry.obj.position.set(-12 + index * 0.9, (bounds.minY + bounds.maxY) / 2,
+  entry.obj.position.set(layer === 'front' ? -12 + (index - 18) * 3.4 : -12 + index * 0.9, (bounds.minY + bounds.maxY) / 2,
     (bounds.minZ + bounds.maxZ) / 2);
   context.chooseFlightTarget(entry, 0);
   for (let step = 1; step <= 10800; step++) {
@@ -52,6 +52,10 @@ for (let index = 0; index < 26; index++) {
     const towerDistance = Math.hypot(entry.obj.position.x - 5.1, entry.obj.position.z + 1.8);
     assert.ok(entry.obj.position.y >= 12.1 || towerDistance > 0.85,
       `Bird ${index} intersects the tower at ${step}`);
+    const wheelDistance = Math.hypot((entry.obj.position.x + 15.4) / 3.65,
+      (entry.obj.position.z - 8) / 1.6);
+    assert.ok(entry.obj.position.y >= 9 || wheelDistance > 1,
+      `Bird ${index} intersects the foreground Ferris wheel at ${step}`);
   }
 }
 console.log(JSON.stringify({ ...metrics, simulatedSecondsPerBird: 180, birds: 26 }));
