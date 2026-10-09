@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check:flight": "node check-flight.mjs",
+    "check:wheel": "node check-wheel.mjs",
     "start": "node server.mjs"
   },
   "dependencies": {

@@ -8,6 +8,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createFerrisWheel, connectPleasurePier, FERRIS_WHEEL } from './ferris-wheel.js';
 
 const status = document.querySelector('#status');
 const statusText = document.querySelector('#status-text');
@@ -24,11 +25,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color('#7d9a94');
 scene.fog = new THREE.FogExp2('#7d9a94', 0.012);
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 600);
-const start = new THREE.Vector3(19, 13, 35);
-const aim = new THREE.Vector3(0, 3.0, 0);
+const start = new THREE.Vector3(17.5, 13, 35);
+const aim = new THREE.Vector3(-1.5, 3.0, 0);
+const fittedPosition = new THREE.Vector3();
 function fitCamera() {
-  const scale = Math.max(1, Math.min(3.0, 1.35 / camera.aspect));
+  const scale = Math.max(1, Math.min(3.6, 1.35 / camera.aspect));
   camera.position.copy(start).sub(aim).multiplyScalar(scale).add(aim);
+  fittedPosition.copy(camera.position);
 }
 fitCamera();
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -160,6 +163,7 @@ const smokeSprites = [];
 let playing = true;
 let elapsed = 0;
 let dusk = false;
+let ferrisWheel;
 const clock = new THREE.Clock();
 const flightForward = new THREE.Vector3(0, 0, 1);
 const flightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -283,7 +287,7 @@ function batchStatic(root) {
   const buckets = new Map();
   const removed = [];
   root.traverse(obj => {
-    if (!obj.isMesh || obj.morphTargetInfluences || Array.isArray(obj.material)) return;
+    if (!obj.isMesh || obj.isInstancedMesh || obj.morphTargetInfluences || Array.isArray(obj.material)) return;
     let ancestor = obj;
     while (ancestor && ancestor !== root) {
       if (/animated_|Bunting_pennant|Wind_moving_laundry/.test(ancestor.name)) return;
@@ -324,6 +328,7 @@ function batchStatic(root) {
 
 function animateScene(time, delta) {
   water.material.uniforms.time.value = time * 0.22;
+  ferrisWheel?.update(time);
   gulls.forEach((entry, i) => {
     const seed = entry.seed;
     const phase = seed * 0.731;
@@ -427,12 +432,17 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
     if (gulls.length !== 26 || boats.length !== 2) {
       throw new Error(`动画分组不完整：${gulls.length} 只海鸥，${boats.length} 艘船`);
     }
+    connectPleasurePier(root);
     addLocalLights(root);
     batchStatic(root);
+    ferrisWheel = createFerrisWheel();
+    ferrisWheel.setDusk(dusk);
+    scene.add(ferrisWheel.group);
     status.classList.add('hidden');
     window.harbourState = {
       ready: true, gulls: gulls.length, boats: boats.length,
       pennants: pennants.length, linens: linens.length, time: 0,
+      ferrisWheel: { gondolas: FERRIS_WHEEL.gondolas, revolutionSeconds: FERRIS_WHEEL.revolutionSeconds, angle: 0 },
       birdLayers: {
         rear: gulls.filter(entry => entry.layer === 'rear').length,
         middle: gulls.filter(entry => entry.layer === 'middle').length,
@@ -462,6 +472,7 @@ document.querySelector('#time').addEventListener('click', event => {
   sun.intensity = dusk ? 0.9 : 2.2;
   rim.intensity = dusk ? 0.7 : 1.25;
   bloom.strength = dusk ? 0.42 : 0.32;
+  ferrisWheel?.setDusk(dusk);
 });
 document.querySelector('#reset').addEventListener('click', () => {
   fitCamera();
@@ -486,8 +497,14 @@ document.querySelector('#fullscreen').addEventListener('click', async () => {
   }
 });
 addEventListener('resize', () => {
+  const atHome = camera.position.distanceToSquared(fittedPosition) < 0.0001
+    && controls.target.distanceToSquared(aim) < 0.0001;
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  if (atHome) {
+    fitCamera();
+    controls.update();
+  }
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
 });
@@ -505,6 +522,7 @@ function frame() {
     window.harbourState.drawCalls = renderer.info.render.calls;
     window.harbourState.boatHeight = boats[0]?.obj.position.y;
     window.harbourState.waterTime = water.material.uniforms.time.value;
+    window.harbourState.ferrisWheel.angle = ferrisWheel.rotor.rotation.z;
     window.harbourState.camera = camera.position.toArray();
     window.harbourState.flightSnapshot = gulls.slice(0, 3).map(entry => ({
       position: entry.obj.position.toArray(), rotation: entry.obj.quaternion.toArray(),
