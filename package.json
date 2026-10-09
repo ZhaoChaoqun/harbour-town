@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "check:flight": "node check-flight.mjs",
     "start": "node server.mjs"
   },
   "dependencies": {

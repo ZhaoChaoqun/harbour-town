@@ -161,6 +161,86 @@ let playing = true;
 let elapsed = 0;
 let dusk = false;
 const clock = new THREE.Clock();
+const flightForward = new THREE.Vector3(0, 0, 1);
+const flightEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const flightHeading = new THREE.Vector3();
+const steeringTarget = new THREE.Vector3();
+
+function flightNoise(time, seed) {
+  const cell = Math.floor(time), t = time - cell;
+  const random = index => {
+    let n = Math.imul(index + 8192, 374761393) ^ Math.imul(seed + 23, 668265263);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295 * 2 - 1;
+  };
+  const a = random(cell), difference = random(cell + 1) - a;
+  return {
+    value: a + difference * t * t * (3 - 2 * t),
+    slope: difference * 6 * t * (1 - t),
+  };
+}
+
+function chooseFlightTarget(entry, time) {
+  const waypoint = ++entry.waypoint;
+  const random = channel => (flightNoise(waypoint * 11 + channel, entry.seed * 97).value + 1) / 2;
+  const bounds = entry.bounds;
+  entry.target.set(
+    -12 + random(0) * 24,
+    bounds.minY + 0.5 + random(1) * (bounds.maxY - bounds.minY - 1),
+    bounds.minZ + 0.6 + random(2) * (bounds.maxZ - bounds.minZ - 1.2)
+  );
+  if (entry.target.distanceTo(entry.obj.position) < 5) {
+    entry.target.x = (entry.obj.position.x > 0 ? -1 : 1) * (6 + random(3) * 5);
+  }
+  entry.nextTargetTime = time + 9 + random(4) * 7;
+}
+
+function flyGull(entry, time, delta) {
+  if (delta <= 0) return;
+  if (time >= entry.nextTargetTime || entry.obj.position.distanceTo(entry.target) < 1.4) {
+    chooseFlightTarget(entry, time);
+  }
+  steeringTarget.copy(entry.target);
+  const position = entry.obj.position;
+  if (Math.abs(position.x) > 14) steeringTarget.x = Math.sign(position.x) * 6;
+  if (position.z < entry.bounds.minZ + 0.4 || position.z > entry.bounds.maxZ - 0.4) {
+    steeringTarget.z = (entry.bounds.minZ + entry.bounds.maxZ) / 2;
+  }
+  flightHeading.subVectors(steeringTarget, position);
+  for (const obstacle of [
+    { x: 5.1, z: -1.8, height: 12.2, warning: 6.5 },
+    { x: 13.8, z: -1.2, height: 6.9, warning: 7.5 },
+  ]) {
+    const dx = position.x - obstacle.x, dz = position.z - obstacle.z;
+    const distance = Math.hypot(dx, dz);
+    if (position.y < obstacle.height && distance < obstacle.warning) {
+      const strength = (1 - distance / obstacle.warning) * 80;
+      flightHeading.x += dx / Math.max(distance, 0.05) * strength;
+      flightHeading.z += dz / Math.max(distance, 0.05) * strength;
+    }
+  }
+  const desiredYaw = Math.atan2(flightHeading.x, flightHeading.z);
+  const difference = Math.atan2(Math.sin(desiredYaw - entry.yaw), Math.cos(desiredYaw - entry.yaw));
+  const desiredTurn = THREE.MathUtils.clamp(difference * 0.7, -0.6, 0.6);
+  entry.turn += THREE.MathUtils.clamp(desiredTurn - entry.turn, -0.8 * delta, 0.8 * delta);
+  entry.yaw += entry.turn * delta;
+  let desiredPitch = THREE.MathUtils.clamp(
+    Math.atan2(flightHeading.y, Math.hypot(flightHeading.x, flightHeading.z)), -0.16, 0.16
+  );
+  if (position.y < entry.bounds.minY + 0.2) desiredPitch = 0.16;
+  if (position.y > entry.bounds.maxY - 0.2) desiredPitch = -0.16;
+  entry.pitch += THREE.MathUtils.clamp(desiredPitch - entry.pitch, -0.07 * delta, 0.07 * delta);
+  const desiredSpeed = 1.2 + flightNoise(time * 0.07 + entry.seed * 0.73, entry.seed * 13).value * 0.25;
+  entry.speed += THREE.MathUtils.clamp(desiredSpeed - entry.speed, -0.15 * delta, 0.15 * delta);
+  entry.bank = THREE.MathUtils.lerp(entry.bank, -entry.turn * 0.46, 1 - Math.exp(-delta * 3));
+  entry.direction.set(
+    Math.sin(entry.yaw) * Math.cos(entry.pitch), Math.sin(entry.pitch),
+    Math.cos(entry.yaw) * Math.cos(entry.pitch)
+  );
+  position.addScaledVector(entry.direction, entry.speed * delta);
+  flightEuler.set(-entry.pitch, entry.yaw, entry.bank, 'YXZ');
+  entry.obj.quaternion.setFromEuler(flightEuler).multiply(entry.headingCorrection);
+}
 
 const smokeCanvas = document.createElement('canvas');
 smokeCanvas.width = smokeCanvas.height = 64;
@@ -242,18 +322,18 @@ function batchStatic(root) {
   removed.forEach(obj => obj.removeFromParent());
 }
 
-function animateScene(time) {
+function animateScene(time, delta) {
   water.material.uniforms.time.value = time * 0.22;
   gulls.forEach((entry, i) => {
-    const phase = i * 0.73;
-    const speed = entry.layer === 'front' ? 0.42 : entry.layer === 'middle' ? 0.35 : 0.28;
-    entry.obj.position.x = entry.base.x + Math.sin(time * speed + phase) * 1.2;
-    entry.obj.position.z = entry.base.z + Math.cos(time * speed + phase) * 0.65;
-    entry.obj.position.y = entry.base.y + Math.sin(time * speed * 2 + phase) * 0.17;
-    entry.obj.rotation.z = Math.sin(time * speed + phase) * 0.09;
+    const seed = entry.seed;
+    const phase = seed * 0.731;
+    flyGull(entry, time, delta);
+    const glide = flightNoise(time * 0.19 + phase + 1.2, seed * 7 + 4).value;
+    const wingBeat = Math.sin(time * (3.0 + (seed % 5) * 0.32) + phase)
+      * (0.18 + (glide + 1) * 0.23);
     entry.obj.traverse(child => {
       if (child.morphTargetInfluences?.length) {
-        child.morphTargetInfluences[0] = Math.sin(time * 4.0 + phase) * 0.6;
+        child.morphTargetInfluences[0] = wingBeat;
       }
     });
   });
@@ -296,7 +376,9 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
           throw new Error(`海鸟编号不正确：${obj.name}`);
         }
         const layer = index < 10 ? 'rear' : index < 18 ? 'middle' : 'front';
-        if (layer === 'middle') {
+        if (layer === 'rear') {
+          obj.position.y = Math.max(9.3, obj.position.y);
+        } else if (layer === 'middle') {
           obj.position.z = 1.7 + (index % 4) * 1.2;
           obj.position.y = 6.3 + (index % 5) * 0.42;
         } else if (layer === 'front') {
@@ -305,7 +387,25 @@ new GLTFLoader().load('./assets/harbour_town.glb', gltf => {
           obj.position.y = 4.6 + (index % 6) * 0.45;
           obj.scale.multiplyScalar(1.3);
         }
-        gulls.push({ obj, base: obj.position.clone(), layer });
+        const modelForward = flightForward.clone();
+        obj.traverse(child => {
+          if (child.name.startsWith('Gull_small_beak')) {
+            modelForward.copy(child.position).normalize();
+          }
+        });
+        const headingCorrection = new THREE.Quaternion().setFromUnitVectors(modelForward, flightForward);
+        const bounds = layer === 'rear' ? { minY: 9.1, maxY: 12.3, minZ: -11, maxZ: -3.1 }
+          : layer === 'middle' ? { minY: 6.1, maxY: 9.1, minZ: 1.4, maxZ: 5.4 }
+            : { minY: 4.1, maxY: 7.9, minZ: 6.0, maxZ: 14.0 };
+        const entry = {
+          obj, base: obj.position.clone(), layer, seed: index + 1,
+          headingCorrection, modelForward, bounds,
+          direction: modelForward.clone(), target: new THREE.Vector3(),
+          yaw: Math.atan2(modelForward.x, modelForward.z), pitch: 0, bank: 0, turn: 0,
+          speed: 1.0 + (index % 7) * 0.055, waypoint: 0, nextTargetTime: 0,
+        };
+        chooseFlightTarget(entry, 0);
+        gulls.push(entry);
       } else if (obj.name.includes('animated_gentle_bobbing')) {
         boats.push({ obj, base: obj.position.clone() });
       } else if (obj.name.startsWith('Bunting_pennant')) {
@@ -395,7 +495,7 @@ function frame() {
   requestAnimationFrame(frame);
   const delta = Math.min(clock.getDelta(), 0.05);
   if (playing) elapsed += delta;
-  animateScene(elapsed);
+  animateScene(elapsed, playing ? delta : 0);
   controls.update();
   scene.fog.density = 0.010 * Math.min(1, 40 / camera.position.distanceTo(controls.target));
   renderer.info.reset();
@@ -406,6 +506,17 @@ function frame() {
     window.harbourState.boatHeight = boats[0]?.obj.position.y;
     window.harbourState.waterTime = water.material.uniforms.time.value;
     window.harbourState.camera = camera.position.toArray();
+    window.harbourState.flightSnapshot = gulls.slice(0, 3).map(entry => ({
+      position: entry.obj.position.toArray(), rotation: entry.obj.quaternion.toArray(),
+    }));
+    window.harbourState.flightChecks = {
+      minimumForwardDot: Math.min(...gulls.map(entry =>
+        flightHeading.copy(entry.modelForward).applyQuaternion(entry.obj.quaternion).dot(entry.direction))),
+      maximumBank: Math.max(...gulls.map(entry => Math.abs(entry.bank))),
+      maximumPitch: Math.max(...gulls.map(entry => Math.abs(entry.pitch))),
+      maximumTurnRate: Math.max(...gulls.map(entry => Math.abs(entry.turn))),
+      minimumSpeed: Math.min(...gulls.map(entry => entry.speed)),
+    };
   }
 }
 frame();

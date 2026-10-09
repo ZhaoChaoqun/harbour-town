@@ -9,7 +9,8 @@ four moving linens, reflective water, and chimney smoke. Orbit, zoom, and pan
 around the town; pause its motion, switch between daylight and dusk, reset the
 camera, save a PNG, or enter fullscreen.
 The gulls occupy three depths: 10 rear, 8 middle, and 8 larger foreground birds
-flying lower over the water, with different flight speeds for each layer.
+flying lower over the water. Seeded random waypoints guide forward flight, with
+limited turns and climbs, coordinated banking, and tower/crane avoidance.
 Seeded multiscale water normals create natural motion, with calmer water beside
 the quay and subtle ripples around the buoys and fishing boat.
 
@@ -40,6 +41,10 @@ The deterministic build copies `index.html`, `viewer.js`, and the exported
 are no runtime CDN requests, external model downloads, or paid services.
 Do not open the HTML as a `file://` URL: the browser needs HTTP to load modules
 and the model.
+
+Run `npm run check:flight` to simulate each of the 26 birds for 180 seconds and
+check head-to-motion alignment, positive speed, turn/bank/climb limits, and tower
+clearance. The Pages workflow runs this check before building.
 
 ## Publishing
 
