@@ -22,15 +22,15 @@
     button.active { background: #304855; color: #fff7e8; }
     button:focus-visible { outline: 2px solid #eebc75; outline-offset: 2px; }
     .hint { position: absolute; left: 0; right: 0; bottom: 89px; text-align: center;
-      font-size: 11px; pointer-events: none; opacity: .8; text-shadow: 0 1px 5px #173831; }
+      font-size: 11px; pointer-events: none; opacity: .7; text-shadow: 0 1px 5px #173831; transition: opacity .6s; }
+    .hint.dismissed { opacity: 0; }
     #status { position: absolute; inset: 0; display: grid; place-items: center; background: #405464e8; z-index: 3; }
     #status p { max-width: 500px; padding: 24px; text-align: center; line-height: 1.8; }
     #status.hidden { display: none; }
-    .credit { position: absolute; top: 35px; right: 30px; font-size: 10px; opacity: .65; pointer-events: none; }
     @media (max-width: 600px) {
       .heading { top: 20px; left: 20px; } h1 { font-size: 25px; }
       .toolbar { gap: 0; bottom: 17px; } button { padding: 10px 11px; }
-      .credit { display: none; } .hint { bottom: 77px; }
+      .hint { bottom: 77px; }
     }
     @media (max-width: 360px) { button { padding: 10px 8px; } }
   </style>
@@ -45,7 +45,6 @@
 </head>
 <body>
   <header class="heading"><h1>Harbour Town</h1><p>微风港湾 · 一座会呼吸的小镇</p></header>
-  <span class="credit">BLENDER → THREE.JS r180</span>
   <div id="status"><p id="status-text">正在搭建港湾…</p></div>
   <div class="hint">拖动旋转 · 滚轮缩放 · 右键平移</div>
   <nav class="toolbar" aria-label="场景控制">

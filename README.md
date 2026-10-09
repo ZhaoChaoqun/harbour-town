@@ -27,6 +27,10 @@ with a blue-grey sky and quieter, deeper water. Daylight keeps the shops, cafe,
 and some homes visibly warm, rather than turning every window off. Unlit windows
 and three interior brightness levels preserve contrast without excessive bloom.
 
+Warm, low side light and restrained sky fill highlight the cafe and main hotel.
+Soft cast shadows and quiet, irregular reflections keep the scene sharp and
+readable even when paused, without depth-of-field blur.
+
 ## Controls
 
 Drag to orbit, scroll to zoom, and right-drag to pan. On touchscreens, drag to
@@ -36,6 +40,8 @@ The lighting button initially reads **日间** because dusk is active. Reset
 selects a closer, lower desktop overview or a separate, larger portrait
 composition. Resizing follows the home composition until you orbit, zoom, or pan;
 manual views remain under your control until reset.
+Switching lighting modes adjusts the sky, fill/key lights, window emission, and
+reflections together. The gesture hint fades after interaction.
 
 ## Build and preview locally
 

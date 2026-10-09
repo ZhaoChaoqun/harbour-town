@@ -62,6 +62,7 @@ function fitCamera() {
 }
 fitCamera();
 const controls = new OrbitControls(camera, renderer.domElement);
+let cameraAdjusted = false;
 controls.target.copy(aim);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
@@ -70,8 +71,12 @@ controls.maxDistance = 150;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minPolarAngle = Math.PI * 0.13;
 controls.update();
-let cameraAdjusted = false;
-controls.addEventListener('start', () => { cameraAdjusted = true; });
+const dismissHint = () => document.querySelector('.hint').classList.add('dismissed');
+controls.addEventListener('start', () => {
+  cameraAdjusted = true;
+  dismissHint();
+});
+document.querySelector('.toolbar').addEventListener('click', dismissHint, { once: true });
 function resetHomeView() {
   const damping = controls.enableDamping;
   controls.enableDamping = false;
